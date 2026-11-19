@@ -1,21 +1,31 @@
 pipeline {
     agent any
 
+    environment {
+        PROJECT_DIR = 'exercise9'
+        VENV = "${WORKSPACE}/exercise9/.venv"
+        DEPLOY_DIR = "${WORKSPACE}/exercise9/python-app-deploy"
+    }
+
     stages {
         stage('Build') {
             steps {
                 echo 'Installing dependencies...'
-                sh '''
-                    python3 -m venv .venv
-                    .venv/bin/python -m pip install -r requirements.txt
-                '''
+                dir('exercise9') {
+                    sh '''
+                        python3 -m venv .venv
+                        .venv/bin/python -m pip install -r requirements.txt
+                    '''
+                }
             }
         }
 
         stage('Test') {
             steps {
                 echo 'Running unit tests...'
-                sh '.venv/bin/python -m unittest discover -s .'
+                dir('exercise9') {
+                    sh '.venv/bin/python -m unittest discover -s . -p "test_*.py"'
+                }
             }
         }
 
@@ -23,8 +33,8 @@ pipeline {
             steps {
                 echo 'Deploying application...'
                 sh '''
-                    mkdir -p "${WORKSPACE}/python-app-deploy"
-                    cp "${WORKSPACE}/app.py" "${WORKSPACE}/python-app-deploy/"
+                    mkdir -p "${DEPLOY_DIR}"
+                    cp "${WORKSPACE}/exercise9/app.py" "${DEPLOY_DIR}/"
                 '''
             }
         }
@@ -33,9 +43,8 @@ pipeline {
             steps {
                 echo 'Starting application...'
                 sh '''
-                    cd "${WORKSPACE}/python-app-deploy"
-                    nohup "${WORKSPACE}/.venv/bin/python" app.py \
-                        > app.log 2>&1 &
+                    cd "${DEPLOY_DIR}"
+                    nohup "${VENV}/bin/python" app.py > app.log 2>&1 &
                     echo $! > app.pid
                 '''
             }
@@ -45,7 +54,7 @@ pipeline {
             steps {
                 echo 'Testing deployed application...'
                 sh '''
-                    .venv/bin/python - <<'PY'
+                    "${VENV}/bin/python" - <<'PY'
                     import time
                     import urllib.request
 
@@ -65,9 +74,7 @@ pipeline {
                             last_error = error
                             time.sleep(1)
                     else:
-                        raise RuntimeError(
-                            f"Deployed application test failed: {last_error}"
-                        )
+                        raise RuntimeError(f"Application test failed: {last_error}")
                     PY
                 '''
             }
@@ -77,9 +84,8 @@ pipeline {
     post {
         always {
             sh '''
-                if [ -f "${WORKSPACE}/python-app-deploy/app.pid" ]; then
-                    kill "$(cat "${WORKSPACE}/python-app-deploy/app.pid")" \
-                        2>/dev/null || true
+                if [ -f "${DEPLOY_DIR}/app.pid" ]; then
+                    kill "$(cat "${DEPLOY_DIR}/app.pid")" 2>/dev/null || true
                 fi
             '''
         }
